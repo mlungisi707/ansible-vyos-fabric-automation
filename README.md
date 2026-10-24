@@ -60,11 +60,11 @@ Ansible establishes concurrent SSH sockets to collect device facts and run ad-ho
 ### Phase 3: Declarative Configuration Pushing
 The orchestration engine evaluates `configure_vlans.yaml`. It uses declarative resource parameters to inject corporate profiles (**VLAN 10: PRD_DATA**, **VLAN 20: PRD_VOICE**, and **VLAN 50: SEC_CAMERAS**) across the fabric. To protect automated execution lines, active user configuration attributes are modified with `no-pager` options to block interactive terminal text string pausing.
 
-![VLAN Core Playbook Design](05-ansible-vlan-playbook.png)
+![VLAN Core Playbook Design](05-ansible-vlan-playbbok.png)
 
 The script triggers parallel execution blocks, syncing the target infrastructure models into their intended target state.
 
-![Ansible Playbook Deployment Run](06-ansible-playbook-run.png)
+![Ansible Playbook Deployment Run](06-ansible-playbook-vlan-run.png)
 
 ---
 
