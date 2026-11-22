@@ -1,90 +1,210 @@
-# Enterprise Network Automation Fabric: Multi-Node VLAN Deployment & State Verification
+<div align="center">
 
-An enterprise-grade network automation project deploying virtual local area networks (VLANs) across multiple infrastructure layers simultaneously using **Ansible Core**. This repository avoids basic simulators by orchestrating standalone **VyOS Virtual Enterprise Appliances** running inside a local hypervisor environment. It features declarative configuration playbooks alongside custom programmatic verification gates designed to intercept operational faults before they hit production pipelines.
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0f2027,50:203a43,100:2c5364&height=230&section=header&text=Ansible%20%2B%20VyOS%20Fabric&fontSize=50&fontColor=ffffff&fontAlignY=38&desc=Multi-Node%20VLAN%20Deployment%20%26%20State%20Verification&descSize=17&descAlignY=60&animation=fadeIn" width="100%" alt="Ansible and VyOS fabric automation banner"/>
 
----
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=20&duration=3500&pause=900&color=38BDF8&center=true&vCenter=true&width=780&lines=Declarative+VLAN+deployment+with+Ansible;Two+VyOS+appliances+configured+from+one+inventory;A+verification+gate+tested+against+real+output" alt="Typing animation"/>
 
-## 🏗️ Production Architecture & Real-World Use Case
+<br/>
 
-In a high-density production environment, manually logging into individual switches via the Command Line Interface (CLI) introduces human configuration error and creates config drift. This deployment utilizes an **idempotent engine** to enforce structural consistency across network switches simultaneously from a centralized inventory model.
+![Ansible](https://img.shields.io/badge/Ansible%20Core-2.20.1-EE0000?style=for-the-badge&logo=ansible&logoColor=white)
+![VyOS](https://img.shields.io/badge/VyOS-Rolling%20Release-FFB300?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![VMware](https://img.shields.io/badge/VMware-Workstation-607078?style=for-the-badge&logo=vmware&logoColor=white)
+![Ubuntu](https://img.shields.io/badge/Ubuntu-WSL-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Completed-brightgreen?style=for-the-badge)
 
-To prevent service-disrupting automation lockouts, this architecture incorporates **Out-of-Band Management (OOBM)** patterns. Management interfaces (`eth0`/`eth1`) run on independent routing lanes strictly for SSH orchestration traffic. This isolates the configuration control loop from the production data plane, ensuring administrative connectivity remains active even during drastic interface structural updates.
+[Overview](#-overview) · [Architecture](#-architecture) · [Stack](#-technology-stack) · [Structure](#-repository-structure) · [Evidence](#-execution--verification-evidence) · [Finding](#-finding-a-false-positive-in-the-verification-gate) · [Results](#-test-results) · [Next steps](#-possible-next-steps)
 
----
-
-## 🛠️ Technology Stack & Dependencies
-
-*   **Automation Control Node:** Ubuntu Linux (WSL Engine)
-*   **Orchestration Engine:** Ansible Core (v2.20.1) / Python 3.14
-*   **Infrastructure Hypervisor:** VMware Workstation
-*   **Target Core Operating Systems:** VyOS Rolling Release Appliances
-*   **Cryptographic Transport Interface:** Paramiko SSHv2 Client Driver Library
+</div>
 
 ---
 
-## 📂 Repository Project Structure
+## 📌 Overview
+
+This project uses **Ansible Core** to deploy VLANs on two network devices at the same time. Instead of a simulator, it automates standalone **VyOS virtual appliances** running in VMware Workstation.
+
+The playbooks are **declarative**: they describe the VLANs that should exist, and Ansible makes the devices match. A second playbook acts as a **verification gate**. It reads the interface state after deployment and is meant to stop the run when an interface is down.
+
+**Highlights**
+
+- One YAML inventory drives both VyOS nodes in parallel
+- VLAN 10 `PRD_DATA`, VLAN 20 `PRD_VOICE` and VLAN 50 `SEC_CAMERAS` deployed by one playbook
+- Running configuration and interface state checked on both devices
+- A false positive in the verification gate was found, explained from the evidence, and corrected (see [Finding](#-finding-a-false-positive-in-the-verification-gate))
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+  CN["Control node<br/>Ubuntu on WSL<br/>Ansible Core 2.20.1"]
+  CN -- "SSH (network_cli)" --> S1["Core-Switch-01<br/>VyOS · 192.168.246.128<br/>VLANs on eth0"]
+  CN -- "SSH (network_cli)" --> S2["Core-Switch-02<br/>VyOS · 192.168.246.129<br/>VLANs on eth1"]
+```
+
+**Why automate this?** In a busy network, logging in to every device by hand leads to typing mistakes and configuration drift. An **idempotent** playbook can be run again and again and always ends in the same state, so every device gets the same configuration from one central inventory.
+
+**How VLANs work on VyOS.** VyOS is a router operating system, so a VLAN is built as an 802.1Q sub-interface (`vif`) on an Ethernet interface. The host variable `vlan_interface` in the inventory chooses the parent interface for each device: `eth0` on Core-Switch-01 and `eth1` on Core-Switch-02.
+
+**Management access.** Each node has one DHCP-addressed interface that Ansible uses for SSH, and the VLAN sub-interfaces are created on that same interface. A separate out-of-band management interface is the usual production design and is listed under next steps.
+
+---
+
+## 🛠️ Technology stack
+
+| Layer | Technology |
+|---|---|
+| Automation control node | Ubuntu Linux on WSL |
+| Orchestration engine | Ansible Core 2.20.1 with Python 3.14 |
+| Connection | `ansible.netcommon.network_cli` with `ansible_network_os: vyos.vyos.vyos` |
+| Modules | `vyos.vyos.vyos_facts`, `vyos.vyos.vyos_vlan`, `vyos.vyos.vyos_command` |
+| Transport | SSH using Paramiko (the fallback when `ansible-pylibssh` is not installed) |
+| Hypervisor | VMware Workstation |
+| Target operating system | VyOS 2026.10.07 rolling release |
+
+> **Note:** the usernames and passwords in this repository are throwaway values for an isolated lab. They appear in some screenshots.
+
+---
+
+## 📂 Repository structure
 
 ```text
-├── inventory.yaml              # Modern YAML multi-device asset map
-├── configure_vlans.yaml        # Declarative VLAN layout configuration playbook
-├── verify_interfaces.yaml       # Operational interface state gate validation playbook
-└── .gitignore                  # Active Git track filter tracking exclusions
+.
+├── README.md
+├── inventory.yaml            # YAML inventory of both devices
+├── configure_vlans.yaml      # Declarative VLAN configuration playbook
+├── verify_interfaces.yaml    # Interface state verification playbook
+├── .gitignore                # Excludes *.log and .ansible/
+└── images/                   # Evidence screenshots
 ```
 
 ---
 
-## 🚀 Execution & Verification Pipeline
+## 🚀 Execution & verification evidence
 
-### Phase 1: Environment Baseline Verification
-The automation node validates Layer 3 reachability to the isolated management infrastructure planes across the host virtualization layer using ICMP echo requests before initializing data sessions.
+### Phase 1 · Environment baseline
 
-![WSL Management Ping Validation](images/02-wsl-management-ping-test.png)
+Before any SSH session starts, the control node checks that both devices answer on the management network.
 
-Project environment variables and tracking configurations are structured directly inside a modern IDE workspace configuration.
+![WSL management ping test](images/02-wsl-management-ping-test.png)
+*Figure 1 – Ping from the WSL control node to `192.168.246.128` and `192.168.246.129`: 3 of 3 replies each, 0% packet loss.*
 
-![VS Code Workspace Project Structure](images/01-vscode-project-structure.png)
+The project is a small VS Code workspace running in WSL Ubuntu.
+
+![VS Code project structure](images/01-vscode-project-structure.png)
+*Figure 2 – Project files: `inventory.yaml`, `configure_vlans.yaml`, `verify_interfaces.yaml` and `.gitignore`.*
+
+### Phase 2 · Inventory and host variables
+
+Both devices sit in the group `vyos_switches`. Connection settings (user, network OS, connection type) are shared in the group variables, and each host has its own `ansible_host` and `vlan_interface`.
+
+![Host-level variable mapping](images/03-ansible-host-var-check.png)
+*Figure 3 – `ansible-inventory --host` for each device: Core-Switch-01 resolves to `192.168.246.128` with `vlan_interface: eth0`, and Core-Switch-02 to `192.168.246.129` with `vlan_interface: eth1`.*
+
+An ad-hoc run of the `vyos_facts` module confirms that Ansible can log in and read the device.
+
+![Ansible fact gathering](images/04-ansible-facts-gathering.png)
+*Figure 4 – Ad-hoc fact gathering: VyOS 2026.10.07 rolling on a VMware virtual machine.*
+
+### Phase 3 · Declarative configuration push
+
+`configure_vlans.yaml` uses the `vyos_vlan` module with an `aggregate` list to create **VLAN 10 `PRD_DATA`**, **VLAN 20 `PRD_VOICE`** and **VLAN 50 `SEC_CAMERAS`**. The parent interface comes from each host's `vlan_interface` variable, and `state: present` describes the target state.
+
+![VLAN playbook](images/05-ansible-vlan-playbook.png)
+*Figure 5 – The VLAN configuration playbook.*
+
+![Playbook run](images/06-ansible-playbook-vlan-run.png)
+*Figure 6 – Playbook run: `ok=1`, `changed=0`, `failed=0` and `unreachable=0` on both devices. `changed=0` means the devices already matched the declared state, which is how an idempotent run looks. The deprecation warnings come from the Paramiko fallback.*
+
+### Phase 4 · State verification
+
+**Running configuration**
+
+![Core-Switch-01 configuration](images/08-switch-01-config-vif.png)
+*Figure 7 – Core-Switch-01 (`show configuration commands | match eth`): `vif 10`, `vif 20` and `vif 50` with their descriptions on `eth0`.*
+
+![Core-Switch-02 configuration and interface state](images/09-switch-02-config-vif.png)
+*Figure 8 – Core-Switch-02: the same three VLANs on `eth1`, followed by `show interfaces`. Every interface, including `eth1.10`, `eth1.20` and `eth1.50`, reports `u/u` (up/up).*
+
+**Verification gate**
+
+![Verification gate output](images/07-ansible-alert-fail.png)
+*Figure 9 – `verify_interfaces.yaml` stops the run on both devices with the alert "Interface port state is currently down on this node!".*
 
 ---
 
-### Phase 2: Host Variable & Inventory Structural Analysis
-Devices are grouped into structured object patterns inside `inventory.yaml`. Host-specific attributes are dynamically mapped to individual endpoints while global behavioral connection settings are evaluated across the parent variables block.
+## 🔎 Finding: a false positive in the verification gate
 
-![Host-Level Variable Mapping](images/03-ansible-host-var-check.png)
+The gate in Figure 9 fails on both devices, but Figure 8 shows that nothing is down: all VLAN sub-interfaces are `u/u`.
 
-Ansible establishes concurrent SSH sockets to collect device facts and run ad-hoc validation routines across targets using Paramiko engine plugins.
+The cause is the condition in `verify_interfaces.yaml`:
 
-![Ansible Ad-Hoc Facts Run](images/04-ansible-facts-gathering.png)
+```yaml
+when: "' D ' in interface_output.stdout[0] or ' d ' in interface_output.stdout[0]"
+```
+
+VyOS prints a legend line above the interface table:
+
+```text
+Codes: S - State, L - Link, u - Up, D - Down, A - Admin Down
+```
+
+That line contains ` D `, so the condition is true on every run, whatever the real interface state.
+
+**Lesson:** a text search over a whole command output also matches headers and legends. Check the state and link column (`S/L`) of each interface line instead.
+
+**Corrected check.** It passes when every interface is `u/u` and fails when any interface shows another value such as `A/D`. It was tested against the captured `show interfaces` output.
+
+```yaml
+- name: Flag interfaces that are not up/up
+  ansible.builtin.fail:
+    msg: "[ALERT] Interface(s) not up/up on {{ inventory_hostname }}: {{ not_up | join(' | ') }}"
+  vars:
+    not_up: >-
+      {{ interface_output.stdout[0].splitlines()
+         | select('search', '[ ](?!u/u)[uAD]/[uAD]([ ]|$)')
+         | map('trim')
+         | list }}
+  when: not_up | length > 0
+```
 
 ---
 
-### Phase 3: Declarative Configuration Pushing
-The orchestration engine evaluates `configure_vlans.yaml`. It uses declarative resource parameters to inject corporate profiles (**VLAN 10: PRD_DATA**, **VLAN 20: PRD_VOICE**, and **VLAN 50: SEC_CAMERAS**) across the fabric. To protect automated execution lines, active user configuration attributes are modified with `no-pager` options to block interactive terminal text string pausing.
+## ✅ Test results
 
-![VLAN Core Playbook Design](images/05-ansible-vlan-playbbok.png)
-
-The script triggers parallel execution blocks, syncing the target infrastructure models into their intended target state.
-
-![Ansible Playbook Deployment Run](images/06-ansible-playbook-vlan-run.png)
+| # | Check | Expected | Result | Evidence |
+|---|---|---|---|---|
+| 1 | Control node reaches both devices | ICMP replies | ✅ Pass | Fig. 1 |
+| 2 | Inventory and host variables | Each device resolves its own settings | ✅ Pass | Fig. 3 |
+| 3 | Fact gathering over SSH | Facts returned from the devices | ✅ Pass | Fig. 4 |
+| 4 | VLAN deployment (10, 20, 50) | Run finishes with `failed=0` on both devices | ✅ Pass | Fig. 5, 6 |
+| 5 | Running configuration | `vif 10`, `20`, `50` present on both devices | ✅ Pass | Fig. 7, 8 |
+| 6 | Interface state | VLAN sub-interfaces `u/u` | ✅ Pass | Fig. 8 |
+| 7 | Verification gate (original) | Stops only when an interface is down | ⚠️ False positive found | Fig. 8, 9 |
 
 ---
 
-### Phase 4: Post-Deployment State Verification
+## 🧭 Possible next steps
 
-#### Core Switch Active Configurations
-Operational commands verify that the configuration modifications have successfully updated the running network configuration kernel.
+- Replace the gate condition with the corrected check above, then test it with a deliberately disabled sub-interface
+- Use a dedicated out-of-band management interface
+- Install `ansible-pylibssh` to remove the Paramiko fallback warning
+- Store credentials with **Ansible Vault**
+- Split the playbooks into **roles** for reuse
+- Preview changes with `--check --diff` before deploying
+- Add `ansible-lint` as an automated check
 
-**Core-Switch-01 Running Configuration Proof:**
-![Switch 01 Interface Configuration](images/08-switch-01-config-vif.png)
+---
 
-**Core-Switch-02 Running Configuration Proof:**
-![Switch 02 Interface Configuration](images/09-switch-02-config-vif.png)
+## 🎯 Skills demonstrated
 
-#### Programmatic Gate Validation & Expected Failures
-The verification pipeline `verify_interfaces.yaml` utilizes the `ansible.builtin.fail` intercept engine to catch interface states. This task purposefully throws an exception flag on both devices during verification:
+`Ansible` · `YAML` · `Idempotent configuration` · `Inventory design` · `VyOS` · `VLANs (802.1Q sub-interfaces)` · `SSH automation` · `Verification gates` · `Troubleshooting automation logic` · `Linux on WSL` · `VMware Workstation` · `Git`
 
-![Verification Pipeline State Alert Fail](images/07-ansible-alert-fail.png)
+<div align="center">
 
-**Architectural Explanation of the Validation Intercept:**
-While the parent management interface links (`eth0`/`eth1`) remain completely **UP** and accessible (allowing the playbook to run and receive ping replies), the newly generated virtual subinterfaces (**`eth0.10`**, **`eth0.20`**, and **`eth0.50`**) are explicitly flagged as **Down (`D`)** by the switch operating system. 
+<sub>Built and documented by Soweto</sub>
 
-In enterprise network mechanics, virtual subinterfaces cannot transition to a live operational **UP** status until physical endpoint machines are connected to the interface ports to send real electrical signaling traffic across that specific tag. The verification engine successfully identifies these un-cabled links using conditional string matching filters (`when: "' D ' in interface_output.stdout"`), purposefully failing the play to alert network administrators of non-operational data ports before shipping to production.
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:2c5364,50:203a43,100:0f2027&height=120&section=footer" width="100%" alt="footer banner"/>
+
+</div>
