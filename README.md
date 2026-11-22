@@ -203,7 +203,7 @@ That line contains ` D `, so the condition is true on every run, whatever the re
 
 <div align="center">
 
-<sub>Built and documented by Soweto</sub>
+<sub>Built and documented by Mlungisi</sub>
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2c5364,50:203a43,100:0f2027&height=120&section=footer" width="100%" alt="footer banner"/>
 
